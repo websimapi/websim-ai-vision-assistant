@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vision Assistant</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        main {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        #camera-container {
+            position: relative;
+            flex: 1;
+            overflow: hidden;
+            background-color: #000;
+        }
+        
+        #video-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #snapshot-canvas {
+            display: none;
+        }
+        
+        #capture-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        #chat-container {
+            height: 40%;
+            overflow-y: auto;
+            background-color: white;
+            padding: 1rem;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.8rem;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        
+        .user-message {
+            background-color: #3498db;
+            color: white;
+            margin-left: auto;
+        }
+        
+        .ai-message {
+            background-color: #ecf0f1;
+            color: #2c3e50;
+        }
+        
+        #controls {
+            display: flex;
+            padding: 1rem;
+            background-color: #ecf0f1;
+            border-top: 1px solid #bdc3c7;
+        }
+        
+        #voice-button {
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        
+        #message-input {
+            flex: 1;
+            padding: 0.8rem;
+            border: 1px solid #bdc3c7;
+            border-radius: 25px;
+            font-size: 16px;
+        }
+        
+        #send-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            padding: 0.8rem 1.5rem;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        
+        #status-bar {
+            position: absolute;
+            top: 10px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            z-index: 100;
+        }
+        
+        .status-indicator {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            margin: 0 5px;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>AI Vision Assistant</h1>
+    </header>
+    
+    <main>
+        <div id="camera-container">
+            <video id="video-feed" playsinline autoplay></video>
+            <canvas id="snapshot-canvas"></canvas>
+            <button id="capture-button" aria-label="Capture image">
+                📷
+            </button>
+            
+            <div id="status-bar">
+                <div id="listening-status" class="status-indicator">Listening...</div>
+                <div id="processing-status" class="status-indicator">Processing...</div>
+                <div id="speaking-status" class="status-indicator">Speaking...</div>
+            </div>
+        </div>
+        
+        <div id="chat-container">
+            <div class="message ai-message">
+                Hello! I'm your AI vision assistant. I can help describe what you're looking at. 
+                Press the camera button to take a picture or use the microphone to ask a question.
+            </div>
+        </div>
+        
+        <div id="controls">
+            <button id="voice-button" aria-label="Start voice input">
+                🎤
+            </button>
+            <input type="text" id="message-input" placeholder="Type your question...">
+            <button id="send-button">Send</button>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM elements
+            const videoFeed = document.getElementById('video-feed');
+            const snapshotCanvas = document.getElementById('snapshot-canvas');
+            const captureButton = document.getElementById('capture-button');
+            const chatContainer = document.getElementById('chat-container');
+            const messageInput = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+            const voiceButton = document.getElementById('voice-button');
+            
+            // Status indicators
+            const listeningStatus = document.getElementById('listening-status');
+            const processingStatus = document.getElementById('processing-status');
+            const speakingStatus = document.getElementById('speaking-status');
+            
+            // State variables
+            let conversationHistory = [];
+            let latestImageDataUrl = null;
+            let isListening = false;
+            
+            // Speech recognition setup
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            
+            // Speech synthesis setup
+            const speechSynthesis = window.speechSynthesis;
+            
+            // Initialize camera
+            async function initCamera() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: "environment" }, 
+                        audio: false 
+                    });
+                    videoFeed.srcObject = stream;
+                    addAIMessage("Camera activated. I'm ready to help you see and understand what's around you.");
+                    speakText("Camera activated. I'm ready to help you see and understand what's around you.");
+                } catch (error) {
+                    console.error('Error accessing camera:', error);
+                    addAIMessage("I couldn't access your camera. Please grant camera permissions to use this app.");
+                    speakText("I couldn't access your camera. Please grant camera permissions to use this app.");
+                }
+            }
+            
+            // Capture image from camera
+            function captureImage() {
+                showStatus(processingStatus);
+                
+                // Set canvas dimensions to match video feed
+                snapshotCanvas.width = videoFeed.videoWidth;
+                snapshotCanvas.height = videoFeed.videoHeight;
+                
+                // Draw current video frame to canvas
+                const context = snapshotCanvas.getContext('2d');
+                context.drawImage(videoFeed, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+                
+                // Get data URL of the image
+                latestImageDataUrl = snapshotCanvas.toDataURL('image/jpeg');
+                
+                // Analyze the image
+                analyzeImage();
+            }
+            
+            // Analyze image with AI
+            async function analyzeImage() {
+                addAIMessage("Analyzing what you're looking at...");
+                
+                try {
+                    const completion = await websim.chat.completions.create({
+                        messages: [
+                            {
+                                role: "system",
+                                content: "You are a helpful visual assistant for someone who needs help understanding what they're looking at. Describe what you see in the image in detail, mentioning colors, objects, text, people, and anything notable. Be descriptive but concise."
+                            },
+                            {
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: "What am I looking at? Please describe this image in detail."
+                                    },
+                                    {
+                                        type: "image_url",
+                                        image_url: { url: latestImageDataUrl }
+                                    }
+                                ]
+                            }
+                        ]
+                    });
+                    
+                    const imageDescription = completion.content;
+                    
+                    // Add to conversation history for context
+                    conversationHistory.push({
+                        role: "system",
+                        content: `[IMAGE ANALYSIS: ${imageDescription}]`
+                    });
+                    
+                    // Keep history from getting too long
+                    if (conversationHistory.length > 10) {
+                        conversationHistory = conversationHistory.slice(-10);
+                    }
+                    
+                    // Display and speak the result
+                    addAIMessage(imageDescription);
+                    speakText(imageDescription);
+                    
+                } catch (error) {
+                    console.error('Error analyzing image:', error);
+                    addAIMessage("I'm having trouble analyzing this image. Could you try taking another picture?");
+                    speakText("I'm having trouble analyzing this image. Could you try taking another picture?");
+                }
+                
+                hideStatus(processingStatus);
+            }
+            
+            // Process user message
+            async function processUserMessage(message) {
+                if (!message.trim()) return;
+                
+                addUserMessage(message);
+                showStatus(processingStatus);
+                
+                // Add to conversation history
+                conversationHistory.push({
+                    role: "user",
+                    content: message
+                });
+                
+                try {
+                    // If we have an image, we'll provide it for context
+                    let messageContent = [];
+                    
+                    if (latestImageDataUrl) {
+                        messageContent = [
+                            {
+                                type: "text",
+                                text: message
+                            },
+                            {
+                                type: "image_url",
+                                image_url: { url: latestImageDataUrl }
+                            }
+                        ];
+                    } else {
+                        messageContent = message;
+                    }
+                    
+                    const completion = await websim.chat.completions.create({
+                        messages: [
+                            {
+                                role: "system",
+                                content: "You are a helpful visual assistant. The user may ask about what they're looking at. If they do, use the image to provide detailed answers. If they ask about something not in the image, politely explain you can only help with what you can see. Be concise but thorough."
+                            },
+                            ...conversationHistory,
+                            {
+                                role: "user",
+                                content: messageContent
+                            }
+                        ]
+                    });
+                    
+                    const response = completion.content;
+                    
+                    // Add to conversation history
+                    conversationHistory.push({
+                        role: "assistant",
+                        content: response
+                    });
+                    
+                    // Keep history from getting too long
+                    if (conversationHistory.length > 10) {
+                        conversationHistory = conversationHistory.slice(-10);
+                    }
+                    
+                    // Display and speak the result
+                    addAIMessage(response);
+                    speakText(response);
+                    
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                    addAIMessage("I'm sorry, I couldn't process your question. Please try again.");
+                    speakText("I'm sorry, I couldn't process your question. Please try again.");
+                }
+                
+                hideStatus(processingStatus);
+            }
+            
+            // Voice input handling
+            function startVoiceInput() {
+                if (isListening) return;
+                
+                isListening = true;
+                showStatus(listeningStatus);
+                recognition.start();
+            }
+            
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                messageInput.value = transcript;
+                hideStatus(listeningStatus);
+                isListening = false;
+                processUserMessage(transcript);
+            };
+            
+            recognition.onend = () => {
+                hideStatus(listeningStatus);
+                isListening = false;
+            };
+            
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                hideStatus(listeningStatus);
+                isListening = false;
+                addAIMessage("I couldn't understand what you said. Please try again.");
+            };
+            
+            // Text-to-speech function
+            function speakText(text) {
+                if (speechSynthesis.speaking) {
+                    speechSynthesis.cancel();
+                }
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                
+                showStatus(speakingStatus);
+                
+                utterance.onend = () => {
+                    hideStatus(speakingStatus);
+                };
+                
+                speechSynthesis.speak(utterance);
+            }
+            
+            // UI helper functions
+            function addUserMessage(text) {
+                const messageElement = document.createElement('div');
+                messageElement.className = 'message user-message';
+                messageElement.textContent = text;
+                chatContainer.appendChild(messageElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            function addAIMessage(text) {
+                const messageElement = document.createElement('div');
+                messageElement.className = 'message ai-message';
+                messageElement.textContent = text;
+                chatContainer.appendChild(messageElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            function showStatus(element) {
+                element.classList.add('visible');
+            }
+            
+            function hideStatus(element) {
+                element.classList.remove('visible');
+            }
+            
+            // Event listeners
+            captureButton.addEventListener('click', captureImage);
+            
+            sendButton.addEventListener('click', () => {
+                const message = messageInput.value;
+                messageInput.value = '';
+                processUserMessage(message);
+            });
+            
+            messageInput.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    const message = messageInput.value;
+                    messageInput.value = '';
+                    processUserMessage(message);
+                }
+            });
+            
+            voiceButton.addEventListener('click', startVoiceInput);
+            
+            // Initialize the app
+            initCamera();
+        });
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
